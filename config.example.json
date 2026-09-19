@@ -1,0 +1,14 @@
+{
+  "workspace_url": "https://your-workspace.slack.com",
+  "email": "you@example.com",
+  "password": "",
+  "headless": false,
+  "download_files": true,
+  "max_file_mb": 200,
+  "types": ["public_channel", "private_channel", "mpim", "im"],
+  "channel_delay_s": 2,
+  "scroll_wait_ms": 900,
+  "thread_pace_s": 0.5,
+  "max_scrolls": 500,
+  "max_channel_seconds": 900
+}

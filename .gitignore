@@ -1,0 +1,17 @@
+# Personal config and credentials - never commit
+config.json
+session.json
+storage.json
+.profile/
+
+# Exported data
+output/
+
+# Python
+__pycache__/
+*.pyc
+
+# Packaging
+build/
+dist/
+*.spec
