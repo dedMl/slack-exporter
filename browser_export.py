@@ -179,11 +179,11 @@ def _detect_team(page, session):
     if session.get("team_id"):
         return session["team_id"]
     ws = session.get("workspace_url", "https://slack.com")
-    print(f"打开 {ws} …", flush=True)
+    print(f"Opening {ws} ...", flush=True)
     try:
         page.goto(ws, wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
-        print(f"  [!] 页面加载异常（{e}），继续尝试 …", flush=True)
+        print(f"  [!] Page load error ({e}), continuing anyway ...", flush=True)
     team = None
     deadline = time.time() + 90
     while time.time() < deadline and not team:
@@ -202,7 +202,8 @@ def _detect_team(page, session):
             pass
         page.wait_for_timeout(1000)
     if not team:
-        raise SystemExit("未能识别工作区 team id，请运行 python main.py login 重新登录")
+        raise SystemExit("Could not detect the workspace team id - "
+                         "run python main.py login to log in again")
     # Persist so later runs don't depend on the redirect
     try:
         session["team_id"] = team
@@ -226,7 +227,8 @@ def _wait_view(page, cap, cid, timeout_s=25):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if page.locator("input#email, input[name='email'], input[type='email']").count():
-            raise SystemExit("浏览器登录态已失效，请运行 python main.py login --relogin")
+            raise SystemExit("Browser session expired - "
+                             "run python main.py login --relogin")
         if cid in cap.viewed:
             # Brief extra wait for first-screen requests to finish
             page.wait_for_timeout(2500)
@@ -285,7 +287,8 @@ def _scroll_history(page, cap, cid, cfg):
     start = time.time()
     for n in range(1, max_scrolls + 1):
         if time.time() - start > max_seconds:
-            print(f"    达到单频道时间上限（{last} 条），停止滚动", flush=True)
+            print(f"    Per-channel time limit reached ({last} messages), stopping",
+                  flush=True)
             break
         page.mouse.wheel(0, -random.randint(1100, 1600))
         page.wait_for_timeout(wait_ms + random.randint(0, 400))
@@ -294,16 +297,18 @@ def _scroll_history(page, cap, cid, cfg):
             last = cnt
             idle = 0
             if n % 20 == 0:
-                print(f"    已加载 {cnt} 条 …", flush=True)
+                print(f"    Loaded {cnt} messages ...", flush=True)
             continue
         idle += 1
         # No new messages: check the completion signals
         if idle >= 2 and at_beginning():
-            print(f"    已到对话开头（共 {cnt} 条）", flush=True)
+            print(f"    Reached the beginning of the conversation ({cnt} messages)",
+                  flush=True)
             break
         if empty_start and idle >= 4:
             # Empty first screen + several idle scrolls: empty conversation
-            print("    首屏为空且滚动无果，视为空对话", flush=True)
+            print("    Empty first screen and no progress - treating as empty conversation",
+                  flush=True)
             break
         # "loading history" stuck: wait up to 10s more before counting idle
         try:
@@ -319,7 +324,8 @@ def _scroll_history(page, cap, cid, cfg):
                 last = cap.count(cid)
                 idle = 0
                 continue
-            print("    加载指示卡住超 10s，滚回最新重新拉取 …", flush=True)
+            print("    Loading indicator stuck for 10s+, scrolling back to "
+                  "latest and re-fetching ...", flush=True)
             # User-like recovery: scroll to the latest messages first, then
             # page up again to re-trigger the "load earlier history" sentinel
             for _ in range(6):
@@ -334,7 +340,8 @@ def _scroll_history(page, cap, cid, cfg):
                 idle = 0
             continue
         if cap.has_more.get(cid) is False and idle >= 3:
-            print(f"    服务器确认已到头（共 {cnt} 条）", flush=True)
+            print(f"    Server confirmed no earlier history ({cnt} messages)",
+                  flush=True)
             break
         try:
             at_top = page.evaluate(AT_TOP_JS)
@@ -350,7 +357,7 @@ def _scroll_history(page, cap, cid, cfg):
                 idle = 0
                 continue
             if idle >= idle_limit:
-                print(f"    顶部再无新内容（共 {cnt2} 条）", flush=True)
+                print(f"    No new content at top ({cnt2} messages)", flush=True)
                 break
             # Stuck at the very top: wheel has no effect (scrollTop is 0
             # and the sentinel no longer fires); scroll down then up again
@@ -361,7 +368,7 @@ def _scroll_history(page, cap, cid, cfg):
             page.wait_for_timeout(1200 + random.randint(0, 400))
         elif idle >= idle_limit * 2:
             # Neither at top nor new messages: page may be unfocused/stuck
-            print(f"    滚动无响应（共 {cnt} 条）", flush=True)
+            print(f"    Scrolling unresponsive ({cnt} messages)", flush=True)
             break
 
 
@@ -378,7 +385,7 @@ def _fetch_threads(api, by_ts, cid, cfg):
             reps = api.paginate("conversations.replies", "messages",
                                 channel=cid, ts=m["thread_ts"], limit=200)
         except SlackError as e:
-            print(f"    线程获取失败：{e}", flush=True)
+            print(f"    Thread fetch failed: {e}", flush=True)
             time.sleep(pace)
             continue
         for r in reps:
@@ -398,7 +405,8 @@ def _page_eval(page, js, args):
     except Exception as e:
         if "Failed to fetch" not in str(e) and "Execution context" not in str(e):
             raise
-        print("    页面上下文异常，重载客户端重试 …", flush=True)
+        print("    Page context lost, reloading client and retrying ...",
+              flush=True)
         m = re.match(r"(https://app\.slack\.com/client/[^/]+)", page.url or "")
         page.goto(m.group(1) if m else "https://app.slack.com",
                   wait_until="domcontentloaded", timeout=60000)
@@ -423,15 +431,15 @@ def _fetch_threads_via_page(page, session, by_ts, cid, cfg):
         return 0, False, False
     capped = len(tops) > max_threads
     if capped:
-        print(f"    线程过多（{len(tops)}），本次只取前 {max_threads} 个（已标记）",
-              flush=True)
+        print(f"    Too many threads ({len(tops)}) - fetching only the first "
+              f"{max_threads} this run (flagged)", flush=True)
         tops = tops[:max_threads]
     try:
         res = _page_eval(page, FETCH_REPLIES_JS,
                          {"token": session["token"], "channel": cid,
                           "threads": tops, "pace_ms": pace_ms}) or {}
     except Exception as e:
-        print(f"    线程拉取异常：{e}", flush=True)
+        print(f"    Thread fetch error: {e}", flush=True)
         return 0, capped, True
     added = 0
     for tts, replies in (res or {}).items():
@@ -645,29 +653,31 @@ def _verify_and_backfill(page, session, cid, msgs):
         if not isinstance(r, dict) or r.get("error"):
             break   # verification API failed: keep current results
         if not r.get("older_count"):
-            note = "✓" if total_extra == 0 else f"（校验补拉 {total_extra} 条）✓"
+            note = "✓" if total_extra == 0 else f" (+{total_extra} backfilled) ✓"
             return sorted(by_ts.values(), key=lambda m: float(m["ts"])), note
-        print("    校验发现缺失更早历史，翻页补拉 …", flush=True)
+        print("    Verification found missing earlier history, paging back to fetch ...",
+              flush=True)
         r2 = _page_eval(page, BACKFILL_JS,
                         {"token": session["token"], "channel": cid,
                          "earliest": str(earliest)})
         extra = (r2.get("messages") or []) if isinstance(r2, dict) else []
         if not extra:
-            print(f"    补拉失败：{(r2 or {}).get('error')}", flush=True)
+            print(f"    Backfill failed: {(r2 or {}).get('error')}", flush=True)
             break
         for m in extra:
             if m.get("ts"):
                 by_ts[m["ts"]] = m
         total_extra += len(extra)
         merged = sorted(by_ts.values(), key=lambda m: float(m["ts"]))
-        print(f"    第{round_no + 1}轮补拉 {len(extra)} 条，最早 {merged[0]['ts']}",
-              flush=True)
+        print(f"    Backfill round {round_no + 1}: {len(extra)} messages, "
+              f"earliest {merged[0]['ts']}", flush=True)
     merged = sorted(by_ts.values(), key=lambda m: float(m["ts"]))
-    note = "" if total_extra == 0 else f"（校验补拉 {total_extra} 条）"
+    note = "" if total_extra == 0 else f" (+{total_extra} backfilled)"
     return merged, note
 
 
-def _fetch_all_dms_via_page(page, base, session, types="im,mpim", label="对话"):
+def _fetch_all_dms_via_page(page, base, session, types="im,mpim",
+                            label="conversations"):
     if "app.slack.com" not in page.url:
         page.goto(base, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(4000)
@@ -677,13 +687,13 @@ def _fetch_all_dms_via_page(page, base, session, types="im,mpim", label="对话"
     convs = [r for r in res if r.get("id")]
     done = any(r.get("done") for r in res)
     if errs and not convs:
-        raise SystemExit(f"页面内获取{label}列表失败：{errs}")
+        raise SystemExit(f"Failed to fetch the {label} list in-page: {errs}")
     if not done:
-        print(f"    [!] {label}列表可能未取全（{errs[:2]}），后续可重跑补齐",
-              flush=True)
+        print(f"    [!] {label} list may be incomplete ({errs[:2]}), "
+              "re-run later to fill gaps", flush=True)
     n_mpim = sum(1 for c in convs if c.get("is_mpim"))
-    print(f"页面内获取{label}列表：{len(convs)} 个"
-          + (f"（其中群组 {n_mpim}）" if n_mpim else ""), flush=True)
+    print(f"Fetched {label} list in-page: {len(convs)} total"
+          + (f" ({n_mpim} groups)" if n_mpim else ""), flush=True)
     return convs
 
 
@@ -698,15 +708,15 @@ def _list_channels_via_browser(page, raw: Path, refresh=False, team=None):
     cache = raw / "_channels_cache.json"
     if cache.exists() and not refresh:
         chans = json.loads(cache.read_text(encoding="utf-8"))
-        print(f"使用频道列表缓存（{len(chans)} 个，--refresh-list 可刷新）",
-              flush=True)
+        print(f"Using cached channel list ({len(chans)} channels, "
+              "--refresh-list to refresh)", flush=True)
         return chans
 
     # Navigate into the client first if not there yet (userBoot is only
     # sent at client startup)
     if "app.slack.com/client" not in page.url:
         if not team:
-            raise SystemExit("缺少 team id，无法打开客户端")
+            raise SystemExit("Missing team id, cannot open the client")
         page.goto(f"https://app.slack.com/client/{team}",
                   wait_until="domcontentloaded", timeout=60000)
 
@@ -736,7 +746,8 @@ def _list_channels_via_browser(page, raw: Path, refresh=False, team=None):
             pass
 
     if not data:
-        raise SystemExit("未能截获 client.userBoot（频道列表），请重试或重新登录")
+        raise SystemExit("Failed to capture client.userBoot (channel list) - "
+                         "retry or log in again")
 
     chans = []
     for c in data.get("channels") or []:
@@ -785,7 +796,8 @@ def _list_channels_via_browser(page, raw: Path, refresh=False, team=None):
     n_by = {}
     for c in chans:
         n_by[c["type"]] = n_by.get(c["type"], 0) + 1
-    print(f"userBoot 截获频道列表（共 {len(chans)} 个）：{n_by}", flush=True)
+    print(f"Channel list captured from userBoot ({len(chans)} total): {n_by}",
+          flush=True)
     return chans
 
 
@@ -829,7 +841,7 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                 known = {c.get("id") for c in chans}
                 if scope != "channels":
                     for c in _fetch_all_dms_via_page(page, base, session,
-                                                     "im,mpim", "私信/群组"):
+                                                     "im,mpim", "DMs/groups"):
                         if c["id"] not in known:
                             known.add(c["id"])
                             chans.append({
@@ -842,7 +854,7 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                 if scope != "dm":
                     for c in _fetch_all_dms_via_page(
                             page, base, session,
-                            "public_channel,private_channel", "频道"):
+                            "public_channel,private_channel", "channels"):
                         if c["id"] not in known:
                             known.add(c["id"])
                             chans.append({
@@ -873,8 +885,8 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
             chans.sort(key=lambda c: TYPE_ORDER.get(c.get("type"), 1))
             n_new = sum(1 for c in chans
                         if force or not (raw / f"{c['id']}.json").exists())
-            print(f"共 {len(chans)} 个频道（私信优先）：全量导出 {n_new} 个，"
-                  f"增量更新 {len(chans) - n_new} 个", flush=True)
+            print(f"{len(chans)} channels (DMs first): {n_new} full exports, "
+                  f"{len(chans) - n_new} incremental updates", flush=True)
             if not chans:
                 write_index(raw)
                 return raw
@@ -906,14 +918,15 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                             up_to_date += 1
                             continue
                         if (r or {}).get("error") and not new:
-                            print(f"[{i}/{len(chans)}] 「{title}」增量失败："
-                                  f"{r.get('error')}", flush=True)
+                            print(f"[{i}/{len(chans)}] '{title}' incremental "
+                                  f"failed: {r.get('error')}", flush=True)
                             continue
                         by_ts = dict(stored)
                         for m in new:
                             by_ts[m["ts"]] = m
                         if retry_mode == "threads":
-                            print("    补拉上次失败的线程回复 …", flush=True)
+                            print("    Refetching thread replies that failed last run ...",
+                                  flush=True)
                             thread_src = dict(by_ts)
                         else:
                             thread_src = {m["ts"]: m for m in new
@@ -932,13 +945,15 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                                         key=lambda m: float(m["ts"]))
                         verify_failed = False
                         if retry_mode == "verify":
-                            print("    补做上次失败的完整性校验 …", flush=True)
+                            print("    Re-running integrity check that failed last run ...",
+                                  flush=True)
                             try:
                                 merged, _vn = _verify_and_backfill(
                                     page, session, cid, merged)
                             except Exception as e:
                                 verify_failed = True
-                                print(f"    校验异常（跳过）：{e}", flush=True)
+                                print(f"    Verification error (skipped): {e}",
+                                      flush=True)
                         meta = d.get("channel") or {"id": cid}
                         meta["id"] = cid
                         meta.pop("needs_retry", None)
@@ -956,20 +971,21 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                         save_channel(raw, files_dir, meta, merged, api, cfg)
                         done += 1
                         done_incr += 1
-                        extra = f"，补线程 {added} 条" if added else ""
-                        print(f"[{i}/{len(chans)}] 「{title}」增量 +{len(new)} 条"
-                              f"（共 {len(merged)}{extra}）", flush=True)
+                        extra = f", +{added} thread replies" if added else ""
+                        print(f"[{i}/{len(chans)}] '{title}' incremental "
+                              f"+{len(new)} messages "
+                              f"({len(merged)} total{extra})", flush=True)
                     except Exception as e:
-                        print(f"[{i}/{len(chans)}] 「{title}」增量异常：{e}",
-                              flush=True)
+                        print(f"[{i}/{len(chans)}] '{title}' incremental "
+                              f"error: {e}", flush=True)
                     page.wait_for_timeout(300 + random.randint(0, 400))
                     continue
                 if cid not in uboot_ids:
                     # Un-joined public channel: the browser stays on a
                     # preview page where scrolling is useless -- fetch the
                     # full history in-page instead (same-origin requests)
-                    print(f"[{i}/{len(chans)}] 「{title}」（{cid}）未加入，"
-                          f"页面内全量拉取 …", flush=True)
+                    print(f"[{i}/{len(chans)}] '{title}' ({cid}) not joined - "
+                          f"fetching full history in-page ...", flush=True)
                     try:
                         r = _page_eval(
                             page, BACKFILL_JS,
@@ -977,9 +993,9 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                              "earliest": str(time.time())})
                         msgs = [m for m in ((r or {}).get("messages") or [])
                                 if isinstance(m, dict) and m.get("ts")]
-                        note = "（页面内拉取）"
+                        note = " (in-page fetch)"
                         if not msgs:
-                            print("    无聊天内容，忽略", flush=True)
+                            print("    No chat content, ignoring", flush=True)
                         by_ts = {m["ts"]: m for m in msgs}
                         _a, capped, thread_failed = _fetch_threads_via_page(
                             page, session, by_ts, cid, cfg)
@@ -993,7 +1009,8 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                         except Exception as e:
                             vnote = ""
                             verify_failed = True
-                            print(f"    校验异常（跳过）：{e}", flush=True)
+                            print(f"    Verification error (skipped): {e}",
+                                  flush=True)
                         meta = make_meta(ch, merged, users)
                         if capped:
                             meta["threads_capped"] = True
@@ -1003,14 +1020,15 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                             meta["needs_retry"] = "verify"
                         save_channel(raw, files_dir, meta, merged, api, cfg)
                         done += 1
-                        extra = f"（补线程回复 {added} 条）" if added else ""
-                        print(f"    {len(merged)} 条消息{note}{extra}{vnote}",
+                        extra = f" (+{added} thread replies)" if added else ""
+                        print(f"    {len(merged)} messages{note}{extra}{vnote}",
                               flush=True)
                     except Exception as e:
-                        print(f"    跳过：{e}", flush=True)
+                        print(f"    Skipped: {e}", flush=True)
                     page.wait_for_timeout(400 + random.randint(0, 500))
                     continue
-                print(f"[{i}/{len(chans)}] 滚动加载「{title}」（{cid}）…", flush=True)
+                print(f"[{i}/{len(chans)}] Scrolling to load '{title}' ({cid}) ...",
+                      flush=True)
                 cap.current = cid
                 try:
                     page.goto(f"{base}/{cid}", wait_until="domcontentloaded",
@@ -1018,7 +1036,8 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                     if not _wait_view(page, cap, cid):
                         # Direct link did not land in the channel (client
                         # stuck on home); use Ctrl+K jump search
-                        print("    直链未进入频道，用跳转搜索 …", flush=True)
+                        print("    Direct link did not open the channel, "
+                              "using jump search ...", flush=True)
                         _jump_via_search(page, title)
                         _wait_view(page, cap, cid, timeout_s=20)
                     _scroll_history(page, cap, cid, cfg)
@@ -1026,7 +1045,7 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                 except SystemExit:
                     raise
                 except Exception as e:
-                    print(f"    跳过：{e}", flush=True)
+                    print(f"    Skipped: {e}", flush=True)
                     cap.take(cid)
                     continue
 
@@ -1036,15 +1055,16 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                     # where the client stays on a preview): fetch the full
                     # history in-page (same-origin, like the client, no rate
                     # limits)
-                    print("    未等到频道数据，页面内全量拉取 …", flush=True)
+                    print("    No channel data received, fetching full history "
+                          "in-page ...", flush=True)
                     r = _page_eval(page, BACKFILL_JS,
                                    {"token": session["token"],
                                     "channel": cid, "earliest": str(time.time())})
                     msgs = [m for m in ((r or {}).get("messages") or [])
                             if isinstance(m, dict) and m.get("ts")]
-                    note = "（页面内拉取）"
+                    note = " (in-page fetch)"
                 elif not msgs:
-                    print("    无聊天内容，忽略", flush=True)
+                    print("    No chat content, ignoring", flush=True)
 
                 by_ts = {m["ts"]: m for m in msgs}
                 added, capped, thread_failed = _fetch_threads_via_page(
@@ -1059,7 +1079,7 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                 except Exception as e:
                     vnote = ""
                     verify_failed = True
-                    print(f"    校验异常（跳过）：{e}", flush=True)
+                    print(f"    Verification error (skipped): {e}", flush=True)
                 # Fill metadata from the view response channel object (bare
                 # conversation ids collected on /dm lack name/user, which
                 # the view response has)
@@ -1081,8 +1101,8 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
                     meta["needs_retry"] = "verify"
                 save_channel(raw, files_dir, meta, merged, api, cfg)
                 done += 1
-                extra = f"（补线程回复 {added} 条）" if added else ""
-                print(f"    {len(merged)} 条消息{note}{extra}{vnote}", flush=True)
+                extra = f" (+{added} thread replies)" if added else ""
+                print(f"    {len(merged)} messages{note}{extra}{vnote}", flush=True)
                 # Pace control: random pause between channels
                 time.sleep(delay + random.random())
         finally:
@@ -1091,9 +1111,10 @@ def run_browser_export(session, cfg, out_dir: Path, force=False,
     metas = write_index(raw)
     write_meta_json(raw, session)
     total = sum(c.get("total_count") or 0 for c in metas)
-    print(f"本次处理：全量导出 {done - done_incr} 个、增量更新 {done_incr} 个、"
-          f"已最新 {up_to_date} 个；"
-          f"累计 {len(metas)} 个频道 / {total} 条消息 → {raw}", flush=True)
+    print(f"This run: {done - done_incr} full exports, {done_incr} "
+          f"incremental updates, {up_to_date} already up to date; "
+          f"accumulated {len(metas)} channels / {total} messages -> {raw}",
+          flush=True)
     return raw
 
 

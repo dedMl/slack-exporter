@@ -56,18 +56,19 @@ class SlackAPI:
             except requests.RequestException as e:
                 last_err = e
                 wait = min(60, 5 * (attempt + 1))
-                print(f"    网络错误（{type(e).__name__}），{wait}s 后重试 …", flush=True)
+                print(f"    Network error ({type(e).__name__}), retrying in {wait}s ...",
+                      flush=True)
                 time.sleep(wait)
                 continue
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", "5")) + 1
-                print(f"    触发限流，等待 {wait}s …", flush=True)
+                print(f"    Rate limited, waiting {wait}s ...", flush=True)
                 time.sleep(wait)
                 continue
             try:
                 data = r.json()
             except ValueError:
-                last_err = RuntimeError(f"HTTP {r.status_code} 非 JSON 响应")
+                last_err = RuntimeError(f"HTTP {r.status_code} non-JSON response")
                 time.sleep(5)
                 continue
             if not data.get("ok"):
@@ -77,10 +78,11 @@ class SlackAPI:
                     continue
                 if err in ("invalid_auth", "not_authed", "account_inactive"):
                     raise SlackError(
-                        f"{method}: {err} —— 会话已过期，请运行 `python main.py login --relogin` 重新登录")
+                        f"{method}: {err} - session expired, "
+                        "run `python main.py login --relogin` to log in again")
                 raise SlackError(f"{method}: {err}")
             return data
-        raise SlackError(f"{method} 多次重试后仍失败：{last_err}")
+        raise SlackError(f"{method} still failing after retries: {last_err}")
 
     def paginate(self, method, key, **params):
         """Paginate automatically and return all items."""
@@ -113,7 +115,8 @@ class SlackAPI:
                 return True
             except requests.RequestException as e:
                 fails += 1
-                print(f"    附件下载错误（{type(e).__name__}），重试 …", flush=True)
+                print(f"    Attachment download error ({type(e).__name__}), retrying ...",
+                      flush=True)
                 if fails >= 3:
                     # Persistent network failure: skip and let the next run
                     # re-download missing files
@@ -134,7 +137,7 @@ def _safe_name(name):
 # are HTML fragments (<div class="quip-canvas-content">...); wrap them in a
 # full page so they open standalone offline
 _DOC_TMPL = """<!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -143,7 +146,7 @@ _DOC_TMPL = """<!DOCTYPE html>
 </head>
 <body>
 {content}
-<div class="foot">导出自 Slack 画板文档 · {updated}</div>
+<div class="foot">Exported from Slack canvas doc · {updated}</div>
 <script>
 // Offline interaction: channel/message anchor links (viewer/index.html#c=..)
 // are forwarded to the parent viewer; direct double-click navigates here
@@ -271,7 +274,7 @@ def wrap_slack_doc(frag_path: Path, dest: Path, meta: dict):
     # Drop stray </img> closings and zero-width chars after images
     # (they add an extra line)
     html = re.sub(r"\u200b?</img>", "", html)
-    title = meta.get("title") or meta.get("name") or "Slack 文档"
+    title = meta.get("title") or meta.get("name") or "Slack doc"
     updated = ""
     if meta.get("updated"):
         updated = time.strftime("%Y-%m-%d %H:%M",
@@ -286,12 +289,12 @@ def _channel_title(ch, users):
     if t == "im":
         uid = ch.get("user")
         u = users.get(uid) or {}
-        return u.get("real_name") or u.get("name") or uid or "私信"
+        return u.get("real_name") or u.get("name") or uid or "DM"
     if t == "mpim":
         ids = ch.get("members") or []
         names = [(users.get(i) or {}).get("name") or i for i in ids[:6]]
-        title = "、".join(names)
-        return title + ("…" if len(ids) > 6 else "")
+        title = ", ".join(names)
+        return title + ("..." if len(ids) > 6 else "")
     return ch.get("name") or ch.get("id")
 
 
@@ -312,14 +315,14 @@ def load_users(api, raw: Path):
     """User list with cache (avoid re-fetching on every export)."""
     f = raw / "users.json"
     if f.exists():
-        print("使用用户列表缓存（users.json）", flush=True)
+        print("Using cached user list (users.json)", flush=True)
         return json.loads(f.read_text(encoding="utf-8"))
-    print("获取用户列表 …", flush=True)
+    print("Fetching user list ...", flush=True)
     users = {u["id"]: _slim_user(u)
              for u in api.paginate("users.list", "members", limit=200)}
     raw.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(users, ensure_ascii=False), encoding="utf-8")
-    print(f"  共 {len(users)} 个用户", flush=True)
+    print(f"  {len(users)} users", flush=True)
     return users
 
 
@@ -328,16 +331,17 @@ def list_channels(api, raw: Path, cfg, refresh=False):
     cache = raw / "_channels_cache.json"
     if cache.exists() and not refresh:
         chans = json.loads(cache.read_text(encoding="utf-8"))
-        print(f"使用频道列表缓存（{len(chans)} 个，--refresh-list 可刷新）", flush=True)
+        print(f"Using cached channel list ({len(chans)} channels, "
+              "--refresh-list to refresh)", flush=True)
         return chans
     types = ",".join(cfg.get("types") or
                      ["public_channel", "private_channel", "mpim", "im"])
-    print(f"获取频道列表（{types}）…", flush=True)
+    print(f"Fetching channel list ({types}) ...", flush=True)
     chans = api.paginate("conversations.list", "channels",
                          types=types, exclude_archived="false", limit=200)
     raw.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(chans, ensure_ascii=False), encoding="utf-8")
-    print(f"  共 {len(chans)} 个频道", flush=True)
+    print(f"  {len(chans)} channels", flush=True)
     return chans
 
 
@@ -400,8 +404,10 @@ def save_channel(raw: Path, files_dir: Path, meta, messages, api, cfg):
                             # attachments of this channel (json still saved;
                             # next run re-downloads missing files)
                             skip_rest = True
-                            print("    连续 3 个附件下载失败，跳过本频道剩余"
-                                  "附件（下次运行自动补齐）", flush=True)
+                            print("    3 consecutive attachment download "
+                                  "failures - skipping remaining attachments "
+                                  "of this channel (auto-resumed next run)",
+                                  flush=True)
                             break
                         continue
                     if is_doc:
@@ -411,7 +417,7 @@ def save_channel(raw: Path, files_dir: Path, meta, messages, api, cfg):
                 f["local_path"] = f"files/{cid}/{dest.name}".replace("\\", "/")
                 n_ok += 1
         if n_ok:
-            print(f"    下载附件 {n_ok} 个", flush=True)
+            print(f"    Downloaded {n_ok} attachments", flush=True)
     (raw / f"{cid}.json").write_text(
         json.dumps({"channel": meta, "messages": messages}, ensure_ascii=False),
         encoding="utf-8")
@@ -487,7 +493,7 @@ def _fetch_slack_file(fid, api, out_dir, index, pending_docs):
     try:
         fi = api.call("files.info", file=fid).get("file") or {}
     except SlackError as e:
-        print(f"  文件 {fid} 信息获取失败：{e}", flush=True)
+        print(f"  Failed to fetch file {fid} info: {e}", flush=True)
         index["files"][fid] = None
         finfo[fid] = {"path": None}
         return None
@@ -516,7 +522,7 @@ def _fetch_slack_file(fid, api, out_dir, index, pending_docs):
                 finfo[fid] = {"path": None}
                 return None
     rel = f"files/_doclinks/{dest.name}"
-    print(f"  链接目标已补导：{fi.get('title') or name} → {rel}", flush=True)
+    print(f"  Link target exported: {fi.get('title') or name} -> {rel}", flush=True)
     finfo[fid] = {"path": rel, "mime": fi.get("mimetype"),
                   "name": fi.get("name") or fi.get("title") or name,
                   "size": fi.get("size") or 0}
@@ -566,7 +572,7 @@ def _web_snapshot(url, out_dir, failed):
             dest = web / f"{h}{ext}"
             dest.write_bytes(r.content)
         else:
-            raise RuntimeError(f"不支持的类型 {ct}")
+            raise RuntimeError(f"unsupported type {ct}")
         return f"files/_web/{dest.name}"
     except Exception:
         failed.add(url)
@@ -597,7 +603,7 @@ def _embed_html(info, path):
     file card.
     """
     mime = info.get("mime") or ""
-    name = html_mod.escape(info.get("name") or "文件")
+    name = html_mod.escape(info.get("name") or "file")
     size = _fmt_size(info.get("size"))
     if mime.startswith("image/"):
         return (f'<div class="embed-file"><a href="{path}" target="_blank">'
@@ -606,18 +612,18 @@ def _embed_html(info, path):
         return (f'<div class="embed-file">'
                 f'<div class="ef-bar"><a href="{path}" target="_blank">'
                 f'<span class="ef-ico">📄</span><b>{name}</b>'
-                f'<span class="ef-meta">{size} · PDF · 点击新窗口打开</span>'
+                f'<span class="ef-meta">{size} · PDF · open in new tab</span>'
                 f'</a></div>'
                 f'<iframe class="ef-pdf" src="{path}" '
                 f'title="{name}"></iframe></div>')
     # Embedded canvases / tables / others: card style, click to open
     ico = "📝" if mime == "application/vnd.slack-docs" else "📎"
-    kind = ("画板文档" if mime == "application/vnd.slack-docs"
-            else (info.get("name") or "").rsplit(".", 1)[-1].upper() or "文件")
+    kind = ("canvas doc" if mime == "application/vnd.slack-docs"
+            else (info.get("name") or "").rsplit(".", 1)[-1].upper() or "file")
     return (f'<div class="embed-file"><a class="ef-card" href="{path}" '
             f'target="_blank"><span class="ef-ico">{ico}</span>'
             f'<span class="ef-body"><b>{name}</b>'
-            f'<span class="ef-meta">{kind} · {size} · 点击打开</span>'
+            f'<span class="ef-meta">{kind} · {size} · click to open</span>'
             f'</span></a></div>')
 
 
@@ -635,9 +641,9 @@ def _replace_embedded_files(html, api, out_dir, doc_rel, index, pending_docs):
             stats["n"] += 1
             return (f'<div class="embed-file"><div class="ef-bar" '
                     f'style="opacity:.7"><span class="ef-ico">⚠️</span>'
-                    f'<b>嵌入文件无法离线导出</b>'
-                    f'<span class="ef-meta">Slack 限制该文件下载'
-                    f'（sf:{fid}）</span></div></div>')
+                    f'<b>Embedded file cannot be exported offline</b>'
+                    f'<span class="ef-meta">Slack restricts this download'
+                    f' (sf:{fid})</span></div></div>')
         stats["n"] += 1
         path = _rel_to(doc_rel, rel)
         return _embed_html(index["finfo"].get(fid) or {}, path)
@@ -875,20 +881,20 @@ def run_docs_export(session, out_dir: Path, force=False):
                 frag = dest.with_suffix("")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not api.download(url, frag):
-                    print(f"  画板下载失败：{cid}/{f.get('id')} "
-                          f"「{f.get('title') or f.get('name')}」", flush=True)
+                    print(f"  Canvas download failed: {cid}/{f.get('id')} "
+                          f"'{f.get('title') or f.get('name')}'", flush=True)
                     continue
                 wrap_slack_doc(frag, dest, f)
                 frag.unlink()
                 f["local_path"] = f"files/{cid}/{dest.name}".replace("\\", "/")
                 changed = True
                 exported += 1
-                print(f"  画板已导出：{f.get('title') or f.get('name')}"
-                      f" → {f['local_path']}", flush=True)
+                print(f"  Canvas exported: {f.get('title') or f.get('name')}"
+                      f" -> {f['local_path']}", flush=True)
         if changed:
             fp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-    print(f"画板文档：共 {total} 个，本次导出 {exported} 个"
-          f"{'（全部已是离线版）' if exported == 0 else ''}", flush=True)
+    print(f"Canvas docs: {total} found, {exported} exported this run"
+          f"{' (all already offline)' if exported == 0 else ''}", flush=True)
 
     # ---- phase 2: build file index (canvas / attachment -> local path) ----
     # doc_paths collects every canvas file path: the same canvas may appear
@@ -916,8 +922,8 @@ def run_docs_export(session, out_dir: Path, force=False):
 
     # ---- phase 3: localize links inside canvases (recursively process
     # canvases/files discovered via links) ----
-    print("画板链接本地化（互链/嵌入文件/用户名/频道跳转/外站快照）…",
-          flush=True)
+    print("Localizing canvas links (cross-links / embedded files / user "
+          "names / channel jumps / external snapshots) ...", flush=True)
     users = load_users(api, raw)   # {uid: _slim_user} for mention replacement
     pending = list(doc_paths)
     processed = set()
@@ -942,8 +948,8 @@ def run_docs_export(session, out_dir: Path, force=False):
         if n:
             p.write_text(new_html, encoding="utf-8")
             n_links += n
-    print(f"链接本地化完成：处理 {len(processed)} 个画板，"
-          f"重写 {n_links} 处链接", flush=True)
+    print(f"Link localization done: {len(processed)} canvases processed, "
+          f"{n_links} links rewritten", flush=True)
     return exported, total
 
 
@@ -1003,17 +1009,18 @@ def run_export(session, cfg, out_dir: Path, force=False, refresh_list=False):
     chans = [c for c in chans if c.get("type") in ("im", "mpim")] + \
             [c for c in chans if c.get("type") not in ("im", "mpim")]
     todo = [c for c in chans if force or not (raw / f"{c['id']}.json").exists()]
-    print(f"待导出 {len(todo)}/{len(chans)} 个频道（已完成的自动跳过）", flush=True)
+    print(f"{len(todo)}/{len(chans)} channels to export "
+          "(completed ones skipped)", flush=True)
 
     for i, ch in enumerate(todo, 1):
         cid = ch["id"]
         title = _channel_title(ch, users)
-        print(f"[{i}/{len(todo)}] 导出「{title}」（{cid}）…", flush=True)
+        print(f"[{i}/{len(todo)}] Exporting '{title}' ({cid}) ...", flush=True)
         try:
             msgs = api.paginate("conversations.history", "messages",
                                 channel=cid, limit=200)
         except SlackError as e:
-            print(f"    跳过：{e}", flush=True)
+            print(f"    Skipped: {e}", flush=True)
             continue
 
         by_ts = {m["ts"]: m for m in msgs}
@@ -1025,15 +1032,16 @@ def run_export(session, cfg, out_dir: Path, force=False, refresh_list=False):
                     for r in reps:
                         by_ts.setdefault(r["ts"], r)
                 except SlackError as e:
-                    print(f"    线程获取失败：{e}", flush=True)
+                    print(f"    Thread fetch failed: {e}", flush=True)
         merged = sorted(by_ts.values(), key=lambda m: float(m["ts"]))
 
         meta = make_meta(ch, merged, users)
         save_channel(raw, files_dir, meta, merged, api, cfg)
-        print(f"    {len(merged)} 条消息（含线程回复）", flush=True)
+        print(f"    {len(merged)} messages (incl. thread replies)", flush=True)
 
     metas = write_index(raw)
     total = sum(c.get("total_count") or 0 for c in metas)
     write_meta_json(raw, session)
-    print(f"导出完成：{len(todo)} 个频道 / {total} 条消息 → {raw}", flush=True)
+    print(f"Export finished: {len(todo)} channels / {total} messages -> {raw}",
+          flush=True)
     return raw

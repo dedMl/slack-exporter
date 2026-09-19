@@ -10,13 +10,44 @@ own logged-in account. No admin approval or official export request needed.
 > Respect your workspace's rules and local regulations; do not use this to
 > exfiltrate data you are not allowed to access.
 
+## Highlights
+
+- **No admin approval needed** - export with *your own* logged-in account in
+  a real browser session. No workspace admin, no official export request,
+  no waiting.
+- **Incremental sync** - run it again anytime; only messages posted since
+  your last export are fetched and merged into the local archive.
+- **Offline HTML viewing** - a Slack-like UI (sidebar, threads, reactions,
+  attachments) is generated locally. Just open `output/viewer/index.html` -
+  works fully offline straight from `file://`, long after channels are
+  deleted or you leave the workspace.
+- **Offline full-text search** - filter channels and search message text or
+  authors right in the viewer, with highlighted matches. Everything stays
+  on your machine.
+
+## Screenshots
+
+First run: the interactive wizard, then building the offline viewer
+(console output shown as-is):
+
+![Interactive wizard and viewer generation](docs/screenshots/cli-run.png)
+
+The offline viewer (demo data, English UI - follows your browser language
+and switches to Chinese automatically):
+
+| Browsing an exported channel | Thread replies |
+|:---:|:---:|
+| ![Main view](docs/screenshots/viewer-main.png) | ![Thread replies](docs/screenshots/viewer-thread.png) |
+
+![In-channel search with highlighted matches](docs/screenshots/viewer-search.png)
+
 ## Features
 
 - **No admin export needed** - logs in as a regular user via a real browser
   (Playwright + local Chrome/Edge)
-- **Chinese/English adaptive at runtime** - the tool auto-detects and adapts
-  to both Chinese and English Slack client interfaces while exporting
-  (loading indicators, "beginning of conversation" markers, etc.)
+- **Chinese/English adaptive at runtime** - the exporter auto-detects both
+  Chinese and English Slack client interfaces, and the offline viewer UI
+  follows your browser language (override with `?lang=en` / `?lang=zh`)
 - **Two export modes**
   - `browser` (default): simulates a user opening each channel and scrolling
     up; captures the client's own API responses. Gentle on rate limits,

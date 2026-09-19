@@ -86,19 +86,19 @@ def _extract_xoxc(page, workspace_url, timeout_s=120):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if captured.get("token"):
-            print("  已从客户端 API 请求中捕获令牌")
+            print("  Token captured from client API requests")
             return captured["token"]
         try:
             v = page.evaluate("window.boot_data && window.boot_data.api_token")
             if v and v.startswith("xoxc-"):
-                print("  已从 boot_data 提取令牌")
+                print("  Token extracted from boot_data")
                 return v
         except Exception:
             pass
         try:
             m = re.search(r'"api_token"\s*:\s*"(xoxc-[^"]+)"', page.content())
             if m:
-                print("  已从页面内联数据提取令牌")
+                print("  Token extracted from inline page data")
                 return m.group(1)
         except Exception:
             pass
@@ -109,7 +109,7 @@ def _extract_xoxc(page, workspace_url, timeout_s=120):
                 " const m = v.match(/xoxc-[A-Za-z0-9-]+/); if (m) return m[0]; }"
                 " return null; }")
             if v:
-                print("  已从 localStorage 提取令牌")
+                print("  Token extracted from localStorage")
                 return v
         except Exception:
             pass
@@ -136,13 +136,13 @@ def _launch(p, headless):
         try:
             ctx = p.chromium.launch_persistent_context(
                 str(USER_DATA_DIR), channel=channel, **common)
-            print(f"  使用本机 {channel} 浏览器")
+            print(f"  Using local {channel} browser")
             return ctx
         except PWError:
             continue
     ctx = p.chromium.launch_persistent_context(
         str(USER_DATA_DIR), user_agent=UA, **common)
-    print("  未找到本机 Chrome/Edge，使用内置 Chromium（更新版 UA）")
+    print("  Local Chrome/Edge not found - using bundled Chromium")
     return ctx
 
 
@@ -157,9 +157,9 @@ def _autofill(page, email, password):
         email_input.wait_for(state="visible", timeout=10000)
         email_input.fill(email)
         page.keyboard.press("Enter")
-        print(f"  已自动填写邮箱 {email} 并提交")
+        print(f"  Email {email} auto-filled and submitted")
     except Exception:
-        print("  [!] 未能自动填写邮箱，请在浏览器中手动输入")
+        print("  [!] Could not auto-fill the email - enter it manually in the browser")
         return
     page.wait_for_timeout(3000)
 
@@ -171,28 +171,29 @@ def _autofill(page, email, password):
             btn = page.locator("button[type='submit']").first
             if btn.count():
                 btn.click()
-            print("  已自动填写密码并提交")
+            print("  Password auto-filled and submitted")
         except Exception:
-            print("  未出现密码框（邮箱验证码登录），请在浏览器中输入邮箱验证码")
+            print("  No password field (email code login) - enter the code sent to your email")
     else:
-        print("  → 未配置密码：请在浏览器中输入发送到邮箱的验证码（如有 MFA 请一并输入）")
+        print("  -> No password configured: enter the email code in the browser (and MFA code if prompted)")
 
 
 def login(workspace_url, email="", password="", headless=False, timeout_s=1800):
     """Open a browser, log into Slack, return and persist the session dict."""
     if headless:
-        print("提示：邮箱验证码 / MFA 需要人工输入，建议使用有头模式（不加 --headless）")
+        print("Note: email codes / MFA require manual input - "
+              "headful mode (without --headless) is recommended")
 
     with sync_playwright() as p:
         context = _launch(p, headless)
         context.add_init_script(STEALTH_JS)
         page = context.pages[0] if context.pages else context.new_page()
 
-        print(f"打开 {workspace_url} …")
+        print(f"Opening {workspace_url} ...")
         try:
             page.goto(workspace_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            print(f"  [!] 页面加载异常（{e}），继续尝试 …")
+            print(f"  [!] Page load error ({e}), continuing anyway ...")
         page.wait_for_timeout(3000)
 
         token = _cookie(context, "d")
@@ -201,8 +202,10 @@ def login(workspace_url, email="", password="", headless=False, timeout_s=1800):
                 _autofill(page, email, password)
             token = _cookie(context, "d")
             if not token:
-                print("请在打开的浏览器窗口中完成登录（邮箱验证码 / MFA 均可手动输入），"
-                      f"最长等待 {timeout_s // 60} 分钟，登录成功后自动继续 …")
+                print("Complete the login in the opened browser window "
+                      "(email code / MFA can be entered manually), "
+                      f"waiting up to {timeout_s // 60} minutes; "
+                      "the script continues automatically once logged in ...")
                 deadline = time.time() + timeout_s
                 while time.time() < deadline:
                     if _cookie(context, "d"):
@@ -212,14 +215,14 @@ def login(workspace_url, email="", password="", headless=False, timeout_s=1800):
 
         if not token:
             context.close()
-            raise SystemExit("登录失败：未获取到会话令牌，请重试")
+            raise SystemExit("Login failed: no session token obtained, please retry")
 
         if not token.startswith("xoxc-"):
-            print("检测到登录态，正在从客户端提取 API 令牌（xoxc）…")
+            print("Existing session detected - extracting API token (xoxc) from the client ...")
             token = _extract_xoxc(page, workspace_url) or token
         if not token.startswith("xoxc-"):
             context.close()
-            raise SystemExit("登录成功但未能提取到 xoxc API 令牌，请重试")
+            raise SystemExit("Logged in but failed to extract an xoxc API token, please retry")
 
         cookies = [{"name": c["name"], "value": c["value"],
                     "domain": c.get("domain", "")}
@@ -238,7 +241,8 @@ def login(workspace_url, email="", password="", headless=False, timeout_s=1800):
             context.storage_state(path=str(STATE_FILE))
         except Exception:
             pass
-        print("登录成功，会话已保存到 session.json（.profile/ 已保留登录状态）")
+        print("Login successful - session saved to session.json "
+              "(login state kept in .profile/)")
         context.close()
         return session
 

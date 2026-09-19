@@ -16,11 +16,11 @@ from pathlib import Path
 import requests
 
 INDEX_HTML = r"""<!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Slack 记录浏览器</title>
+<title>Slack Archive Viewer</title>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -101,21 +101,31 @@ INDEX_HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <div id="side">
-  <div id="ws">Slack 记录浏览器</div>
+  <div id="ws">Slack Archive Viewer</div>
   <div id="stats"></div>
-  <div class="search"><input id="ch-filter" placeholder="筛选频道…"></div>
+  <div class="search"><input id="ch-filter" placeholder="Filter channels…"></div>
   <div id="chan-list"></div>
 </div>
 <div id="main">
   <div id="head">
-    <div id="ch-title">未选择频道</div>
+    <div id="ch-title">No channel selected</div>
     <div id="ch-meta"></div>
-    <input id="msg-search" placeholder="在当前频道中搜索…">
+    <input id="msg-search" placeholder="Search in this channel…">
   </div>
-  <div id="msgs"><div id="welcome"><h1>Slack 导出记录</h1><p>点击左侧频道开始浏览。</p></div></div>
+  <div id="msgs"><div id="welcome"><h1>Slack Export Archive</h1><p>Click a channel on the left to start browsing.</p></div></div>
 </div>
 <script src="data.js"></script>
 <script>
+/* UI language: follows the browser locale (Chinese for zh*, English
+   otherwise); override with ?lang=en or ?lang=zh */
+const LANG = (new URLSearchParams(location.search).get('lang') ||
+  (navigator.language || 'en')).toLowerCase();
+const ZH = LANG.startsWith('zh');
+const L = (zh, en) => ZH ? zh : en;
+const LOC = ZH ? 'zh-CN' : undefined;
+document.documentElement.lang = ZH ? 'zh' : 'en';
+document.title = L('Slack 记录浏览器', 'Slack Archive Viewer');
+
 const D = window.SLACK_DATA || {users: {}, channels: []};
 const U = D.users || {};
 const SYS = new Set(['channel_join','channel_leave','channel_topic','channel_purpose',
@@ -125,19 +135,19 @@ let current = null;
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-function uname(id){ const u = U[id] || {}; return u.real_name || u.display_name || u.name || ('用户' + id); }
+function uname(id){ const u = U[id] || {}; return u.real_name || u.display_name || u.name || (L('用户', 'user') + id); }
 function color(k){ const cs = ['#e01e5a','#67c830','#2b75cb','#ecb22e','#de4fba','#4ec0d6','#a359d6','#e8912c'];
   let h = 0; for (const c of String(k)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return cs[h % cs.length]; }
 function initials(n){ return (String(n || '?').replace(/[^\p{L}\p{N} ]/gu, '').trim()
   .split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase()) || '?'; }
-function fmtTime(ts){ return new Date(ts * 1000).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}); }
+function fmtTime(ts){ return new Date(ts * 1000).toLocaleTimeString(LOC, {hour: '2-digit', minute: '2-digit'}); }
 function fmtDate(ts){ const d = new Date(ts * 1000), now = new Date();
   const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const b = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const diff = Math.round((a - b) / 86400000);
-  if (diff === 0) return '今天'; if (diff === 1) return '昨天';
-  return d.toLocaleDateString('zh-CN', {year: 'numeric', month: 'long', day: 'numeric'}); }
-function fmtShort(ts){ return new Date(ts * 1000).toLocaleDateString('zh-CN'); }
+  if (diff === 0) return L('今天', 'Today'); if (diff === 1) return L('昨天', 'Yesterday');
+  return d.toLocaleDateString(LOC, {year: 'numeric', month: 'long', day: 'numeric'}); }
+function fmtShort(ts){ return new Date(ts * 1000).toLocaleDateString(LOC); }
 function fmtSize(n){ if (!n && n !== 0) return ''; const u = ['B','KB','MB','GB'];
   let i = 0; while (n >= 1024 && i < u.length - 1){ n /= 1024; i++; } return n.toFixed(n < 10 && i ? 1 : 0) + ' ' + u[i]; }
 
@@ -170,14 +180,14 @@ function avaFail(img){
 }
 
 function sysText(m){
-  const who = m.user ? uname(m.user) : '有人';
+  const who = m.user ? uname(m.user) : L('有人', 'someone');
   switch (m.subtype){
-    case 'channel_join': return who + ' 加入了频道';
-    case 'channel_leave': return who + ' 离开了频道';
-    case 'channel_topic': return who + ' 更新了主题：' + (m.topic || '');
-    case 'channel_purpose': return who + ' 更新了说明：' + (m.purpose || '');
-    case 'channel_name': return who + ' 将频道重命名为 ' + (m.name || '');
-    case 'tombstone': return '此消息已被删除';
+    case 'channel_join': return who + L(' 加入了频道', ' joined the channel');
+    case 'channel_leave': return who + L(' 离开了频道', ' left the channel');
+    case 'channel_topic': return who + L(' 更新了主题：', ' updated the topic: ') + (m.topic || '');
+    case 'channel_purpose': return who + L(' 更新了说明：', ' updated the description: ') + (m.purpose || '');
+    case 'channel_name': return who + L(' 将频道重命名为 ', ' renamed the channel to ') + (m.name || '');
+    case 'tombstone': return L('此消息已被删除', 'This message was deleted');
     default: return m.text || '';
   }
 }
@@ -185,7 +195,7 @@ function sysText(m){
 function renderFiles(m){
   const fs = m.files || []; if (!fs.length) return '';
   return '<div class="files">' + fs.map(f => {
-    const label = esc(f.name || f.title || '文件'), size = fmtSize(f.size);
+    const label = esc(f.name || f.title || L('文件', 'file')), size = fmtSize(f.size);
     if (f.local_path){
       const p = '../' + f.local_path, mt = f.mimetype || '';
       if (mt.startsWith('image/'))
@@ -196,7 +206,7 @@ function renderFiles(m){
         return '<a class="fcard" href="javascript:void 0" data-p="' + esc(p) +
           '" data-t="' + esc(label) + '" onclick="openDocByPath(this.dataset.p,' +
           'this.dataset.t)">📝 ' + label +
-          ' <span>画板文档 · 页内查看</span></a>';
+          ' <span>' + L('画板文档 · 页内查看', 'Canvas doc · view inline') + '</span></a>';
       return '<a class="fcard" href="' + p + '" target="_blank">📄 ' + label +
         (size ? ' <span>' + size + '</span>' : '') + '</a>';
     }
@@ -209,7 +219,7 @@ function renderFiles(m){
 function renderReactions(m){
   const rs = m.reactions || []; if (!rs.length) return '';
   return '<div class="reacts">' + rs.map(r => {
-    const names = (r.users || []).map(uname).join('、');
+    const names = (r.users || []).map(uname).join(ZH ? '、' : ', ');
     return '<span class="react" title="' + esc(names) + '">:' + esc(r.name) + ': ' +
       (r.count || 1) + '</span>';
   }).join('') + '</div>';
@@ -218,8 +228,8 @@ function renderReactions(m){
 function row(m, compact){
   const uid = m.user || '';
   const name = m.username || (U[uid] ? uname(uid) :
-    (m.bot_profile && m.bot_profile.name) || '应用');
-  const t = new Date(m.ts * 1000).toLocaleString('zh-CN');
+    (m.bot_profile && m.bot_profile.name) || L('应用', 'app'));
+  const t = new Date(m.ts * 1000).toLocaleString(LOC);
   let h = '<div class="msg' + (compact ? ' compact' : '') + '" data-ts="' + m.ts + '">';
   h += avaHtml(uid || name, name, (U[uid] || {}).avatar);
   h += '<div class="c">';
@@ -235,7 +245,7 @@ function row(m, compact){
 function toggleThread(btn){
   const t = btn.nextElementSibling, show = t.style.display === 'none';
   t.style.display = show ? 'block' : 'none';
-  btn.textContent = (show ? '▾ ' : '▸ ') + btn.dataset.n + ' 条回复';
+  btn.textContent = (show ? '▾ ' : '▸ ') + btn.dataset.n + L(' 条回复', ' replies');
 }
 
 function match(m, q){
@@ -252,9 +262,9 @@ function renderChannel(id){
   document.getElementById('ch-title').textContent = ch.title || id;
   const meta = [];
   if (ch.topic) meta.push(ch.topic);
-  meta.push((ch.msg_count || 0) + ' 条消息');
+  meta.push((ch.msg_count || 0) + L(' 条消息', ' messages'));
   if (ch.first_ts) meta.push(fmtShort(ch.first_ts) + ' ~ ' + fmtShort(ch.last_ts));
-  if (ch.is_archived) meta.push('已归档');
+  if (ch.is_archived) meta.push(L('已归档', 'Archived'));
   document.getElementById('ch-meta').textContent = meta.join(' · ');
 
   const msgs = (window.__CH && window.__CH[id]) || [];
@@ -282,11 +292,11 @@ function renderChannel(id){
     if (reps && reps.length)
       h += '<div class="msg"><div class="c"><span class="thread-btn" data-n="' +
         reps.length + '" onclick="toggleThread(this)">▸ ' + reps.length +
-        ' 条回复</span><div class="thread" style="display:none">' +
+        L(' 条回复', ' replies') + '</span><div class="thread" style="display:none">' +
         reps.map(r => row(r, false)).join('') + '</div></div></div>';
     lastU = m.user; lastT = +m.ts;
   }
-  if (!list.length) h = '<div class="sysmsg">没有消息</div>';
+  if (!list.length) h = '<div class="sysmsg">' + L('没有消息', 'No messages') + '</div>';
   const box = document.getElementById('msgs');
   box.innerHTML = h; box.scrollTop = 0;
   if (q) highlight(q);
@@ -316,20 +326,21 @@ function openChannel(id){
   document.querySelectorAll('.chan').forEach(e =>
     e.classList.toggle('active', e.dataset.id === id));
   if (window.__CH && window.__CH[id]){ renderChannel(id); return; }
-  document.getElementById('msgs').innerHTML = '<div class="sysmsg">加载中…</div>';
+  document.getElementById('msgs').innerHTML =
+    '<div class="sysmsg">' + L('加载中…', 'Loading…') + '</div>';
   const s = document.createElement('script');
   s.src = 'ch/' + encodeURIComponent(id) + '.js';
   s.onload = () => renderChannel(id);
   s.onerror = () => { document.getElementById('msgs').innerHTML =
-    '<div class="sysmsg">数据加载失败</div>'; };
+    '<div class="sysmsg">' + L('数据加载失败', 'Failed to load data') + '</div>'; };
   document.head.appendChild(s);
 }
 
 const GROUPS = [
-  ['public_channel', '频道', '#'],
-  ['private_channel', '私有频道', '🔒'],
-  ['mpim', '群组', '👥'],
-  ['im', '私信', '✉'],
+  ['public_channel', L('频道', 'Channels'), '#'],
+  ['private_channel', L('私有频道', 'Private channels'), '🔒'],
+  ['mpim', L('群组', 'Group DMs'), '👥'],
+  ['im', L('私信', 'Direct messages'), '✉'],
 ];
 
 const U_BY_NAME = {};
@@ -362,10 +373,10 @@ function buildSidebar(){
       String(d.title || '').toLowerCase().includes(f) ||
       String(d.channel || '').toLowerCase().includes(f));
     if (ds.length){
-      h += '<div class="group-h">画板文档</div>';
+      h += '<div class="group-h">' + L('画板文档', 'Canvas docs') + '</div>';
       for (const d of ds){
-        const tip = esc((d.channel ? '来自 ' + d.channel + ' · ' : '') +
-          (d.updated ? new Date(d.updated * 1000).toLocaleDateString('zh-CN') : ''));
+        const tip = esc((d.channel ? L('来自 ', 'from ') + d.channel + ' · ' : '') +
+          (d.updated ? new Date(d.updated * 1000).toLocaleDateString(LOC) : ''));
         h += '<div class="chan"' + (d.path ? '' : ' style="opacity:.45"') +
           ' title="' + tip + '" onclick="openDoc(this.dataset.p, this.dataset.id)"' +
           ' data-p="' + esc(d.path || '') + '" data-id="' + esc(d.id || '') + '">' +
@@ -375,25 +386,27 @@ function buildSidebar(){
       }
     }
   }
-  document.getElementById('chan-list').innerHTML = h || '<div class="sysmsg">无匹配频道</div>';
+  document.getElementById('chan-list').innerHTML = h ||
+    '<div class="sysmsg">' + L('无匹配频道', 'No matching channels') + '</div>';
 }
 
 function openDoc(path, id){
   const d = (D.docs || []).find(x => x.id === id) || {};
-  if (!path){ alert('该画板文档尚未导出（运行 python main.py export --scope docs）'); return; }
+  if (!path){ alert(L('该画板文档尚未导出（运行 python main.py export --scope docs）',
+    'This canvas doc has not been exported yet (run python main.py export --scope docs)')); return; }
   document.querySelectorAll('.chan').forEach(e =>
     e.classList.toggle('active', e.dataset.id === id));
-  openDocByPath('../' + path, d.title || '画板文档', id, d.channel);
+  openDocByPath('../' + path, d.title || L('画板文档', 'Canvas doc'), id, d.channel);
 }
 
 /* canvas docs render inside the right content area (iframe loads the
    offline HTML; the doc scrolls internally; no new tab) */
 function openDocByPath(path, title, id, chName){
   current = null;   // not in a channel view
-  document.getElementById('ch-title').textContent = title || '画板文档';
+  document.getElementById('ch-title').textContent = title || L('画板文档', 'Canvas doc');
   const meta = [];
-  if (chName) meta.push('来自 ' + chName);
-  meta.push('Slack 画板文档 · 页内渲染');
+  if (chName) meta.push(L('来自 ', 'from ') + chName);
+  meta.push(L('Slack 画板文档 · 页内渲染', 'Slack canvas doc · rendered inline'));
   document.getElementById('ch-meta').textContent = meta.join(' · ');
   document.getElementById('msg-search').style.visibility = 'hidden';
   const box = document.getElementById('msgs');
@@ -429,8 +442,15 @@ function routeFromHash(){
 (function init(){
   if (D.workspace) document.getElementById('ws').textContent = D.workspace;
   document.getElementById('stats').textContent =
-    (D.total_channels || 0) + ' 个频道 · ' + (D.total_messages || 0) +
-    ' 条消息 · 导出于 ' + (D.generated_at || '');
+    (D.total_channels || 0) + L(' 个频道', ' channels') + ' · ' +
+    (D.total_messages || 0) + L(' 条消息', ' messages') +
+    L(' · 导出于 ', ' · exported at ') + (D.generated_at || '');
+  document.getElementById('ch-filter').placeholder = L('筛选频道…', 'Filter channels…');
+  document.getElementById('ch-title').textContent = L('未选择频道', 'No channel selected');
+  document.getElementById('msg-search').placeholder = L('在当前频道中搜索…', 'Search in this channel…');
+  const w = document.getElementById('welcome');
+  if (w) w.innerHTML = '<h1>' + L('Slack 导出记录', 'Slack Export Archive') +
+    '</h1><p>' + L('点击左侧频道开始浏览。', 'Click a channel on the left to start browsing.') + '</p>';
   document.getElementById('ch-filter').addEventListener('input', buildSidebar);
   document.getElementById('msg-search').addEventListener('input',
     () => current && renderChannel(current));
@@ -504,7 +524,8 @@ def _download_avatars(users: dict, viewer: Path):
                 ok += 1
             else:
                 fail += 1
-    print(f"用户头像：{ok} 个本地化，{fail} 个下载失败（保留在线 URL）")
+    print(f"User avatars: {ok} localized, {fail} downloads failed "
+          "(online URLs kept)")
 
 
 def run_html(out_dir: Path):
@@ -582,7 +603,7 @@ def run_html(out_dir: Path):
         "window.SLACK_DATA = " + _js_json(data) + ";", encoding="utf-8")
 
     (viewer / "index.html").write_text(INDEX_HTML, encoding="utf-8")
-    print(f"HTML 浏览器已生成：{viewer / 'index.html'}（{n} 个频道）")
+    print(f"HTML viewer generated: {viewer / 'index.html'} ({n} channels)")
     return viewer / "index.html"
 
 
