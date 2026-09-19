@@ -380,7 +380,7 @@ function buildSidebar(){
         h += '<div class="chan"' + (d.path ? '' : ' style="opacity:.45"') +
           ' title="' + tip + '" onclick="openDoc(this.dataset.p, this.dataset.id)"' +
           ' data-p="' + esc(d.path || '') + '" data-id="' + esc(d.id || '') + '">' +
-          '📝 ' + esc(d.title) +
+          '📝 ' + esc(d.title || L('画板文档', 'Canvas doc')) +
           (d.channel ? '<span class="cnt">' + esc(d.channel) + '</span>' : '') +
           '</div>';
       }
@@ -576,7 +576,8 @@ def run_html(out_dir: Path):
                     lp = fl.get("local_path") or ""
                     docs.append({
                         "id": fl.get("id"),
-                        "title": fl.get("title") or fl.get("name") or "画板",
+                        "title": fl.get("title") or fl.get("name")
+                                  or "Canvas doc",
                         "path": lp,
                         "channel": cmeta.get("title") or cid,
                         "updated": fl.get("updated") or 0,
